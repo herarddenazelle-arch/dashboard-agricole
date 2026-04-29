@@ -24,18 +24,26 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive"
 ]
 
+def get_credentials():
+    """Charge les credentials depuis les secrets Streamlit ou depuis le fichier local."""
+    try:
+        # Mode Streamlit Cloud — lit depuis les secrets
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+    except Exception:
+        # Mode local — lit depuis le fichier credentials.json
+        creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
+    return creds
+
 # --- Fonctions utilitaires ---
 def fr_to_float(valeur):
     """Convertit une valeur française (virgule) en float."""
     try:
         valeur_str = str(valeur).strip()
-        # Cas : séparateur de milliers avec point et décimale avec virgule (ex: 1.210,5)
         if "," in valeur_str and "." in valeur_str:
             valeur_str = valeur_str.replace(".", "").replace(",", ".")
-        # Cas : virgule seule comme décimale (ex: 210,5)
         elif "," in valeur_str:
             valeur_str = valeur_str.replace(",", ".")
-        # Cas : point seul comme décimale (ex: 210.5) — on laisse tel quel
         return float(valeur_str)
     except:
         return 0.0
@@ -46,7 +54,7 @@ def float_to_fr(valeur, decimales=2):
 
 @st.cache_data(ttl=300)
 def load_data():
-    creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
+    creds = get_credentials()
     gc = gspread.authorize(creds)
     sh = gc.open("dashboard_agricole")
 
@@ -54,7 +62,6 @@ def load_data():
     ventes_df = pd.DataFrame(sh.worksheet("ventes").get_all_records())
     params_df = pd.DataFrame(sh.worksheet("parametres").get_all_records())
 
-    # Conversion des colonnes numériques avec virgule
     prix_df["date"] = pd.to_datetime(prix_df["date"])
     prix_df["prix"] = prix_df["prix"].apply(fr_to_float)
 
@@ -236,7 +243,7 @@ with st.form("nouvelle_vente", clear_on_submit=True):
             st.error("❌ Le prix doit être supérieur à 0.")
         else:
             try:
-                creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
+                creds = get_credentials()
                 gc = gspread.authorize(creds)
                 sh = gc.open("dashboard_agricole")
                 sh.worksheet("ventes").append_row([
