@@ -325,8 +325,8 @@ elif st.session_state.page == "dashboard":
                     sh.worksheet("ventes").append_row([
                         str(date_vente),
                         culture_form,
-                        str(quantite).replace(".", ","),
-                        str(prix).replace(".", ","),
+                        quantite,
+                        prix,
                         campagne_selectionnee
                     ])
                     st.success(
