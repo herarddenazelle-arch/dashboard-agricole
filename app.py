@@ -203,6 +203,15 @@ elif st.session_state.page == "dashboard":
                                 key="culture_dashboard")
     st.session_state.culture = culture_sel
 
+    # --- Infos de la culture ---
+    row_info = params_df[params_df["culture"] == culture_sel]
+    if not row_info.empty:
+        surface = row_info.iloc[0]["surface"]
+        rendement = row_info.iloc[0]["rendement_moyen"]
+        col_s, col_r = st.columns(2)
+        col_s.metric("📐 Surface", f"{float_to_fr(surface, 1)} ha")
+        col_r.metric("📦 Rendement moyen", f"{float_to_fr(rendement, 1)} t/ha")
+
     # --- Graphique prix + ventes ---
     st.subheader("📈 Prix Vivescia & mes ventes")
 
@@ -294,8 +303,7 @@ elif st.session_state.page == "dashboard":
     st.subheader("➕ Enregistrer une vente")
 
     with st.form("nouvelle_vente", clear_on_submit=True):
-        culture_form = st.selectbox("Culture", cultures,
-                                     index=cultures.index(culture_sel) if culture_sel in cultures else 0)
+        culture_form = culture_sel
         quantite_saisie = st.text_input("Quantité (t)", value="0", help="Ex : 12,5")
         prix_saisie = st.text_input("Prix (€/t)", value="0", help="Ex : 423,5")
         date_vente = st.date_input("Date de vente")
