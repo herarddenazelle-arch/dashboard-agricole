@@ -52,6 +52,16 @@ st.markdown("""
         padding: 0.75rem;
         margin-bottom: 0.5rem;
     }
+
+    /* Carte vente programmée */
+    .vente-prog {
+        background: #FFF8E1;
+        border-left: 4px solid #FFA000;
+        border-radius: 8px;
+        padding: 0.6rem 0.75rem;
+        margin-bottom: 0.5rem;
+        font-size: 0.95rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -68,6 +78,11 @@ def get_credentials():
     except Exception:
         creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
     return creds
+
+def get_sheet():
+    creds = get_credentials()
+    gc = gspread.authorize(creds)
+    return gc.open("dashboard_agricole")
 
 # --- Fonctions utilitaires ---
 def fr_to_float(valeur):
@@ -86,13 +101,19 @@ def float_to_fr(valeur, decimales=2):
 
 @st.cache_data(ttl=300)
 def load_data():
-    creds = get_credentials()
-    gc = gspread.authorize(creds)
-    sh = gc.open("dashboard_agricole")
+    sh = get_sheet()
 
     prix_df = pd.DataFrame(sh.worksheet("prix_vivescia").get_all_records())
     ventes_df = pd.DataFrame(sh.worksheet("ventes").get_all_records())
     params_df = pd.DataFrame(sh.worksheet("parametres").get_all_records())
+
+    # Gestion onglet ventes_programmees (créé automatiquement s'il n'existe pas)
+    try:
+        prog_df = pd.DataFrame(sh.worksheet("ventes_programmees").get_all_records())
+    except gspread.exceptions.WorksheetNotFound:
+        ws = sh.add_worksheet(title="ventes_programmees", rows=200, cols=6)
+        ws.append_row(["culture", "quantite", "prix_cible", "campagne", "date_saisie"])
+        prog_df = pd.DataFrame(columns=["culture", "quantite", "prix_cible", "campagne", "date_saisie"])
 
     prix_df["date"] = pd.to_datetime(prix_df["date"])
     prix_df["prix"] = prix_df["prix"].apply(fr_to_float)
@@ -105,12 +126,17 @@ def load_data():
     params_df["rendement_moyen"] = params_df["rendement_moyen"].apply(fr_to_float)
     params_df["volume_total_estime"] = params_df["volume_total_estime"].apply(fr_to_float)
 
-    # FIX 1 : forcer la campagne en string pour la comparaison avec l'année courante
+    # Forcer campagne en string
     params_df["campagne"] = params_df["campagne"].astype(str)
     prix_df["campagne"] = prix_df["campagne"].astype(str)
     ventes_df["campagne"] = ventes_df["campagne"].astype(str)
 
-    return prix_df, ventes_df, params_df
+    if not prog_df.empty:
+        prog_df["quantite"] = prog_df["quantite"].apply(fr_to_float)
+        prog_df["prix_cible"] = prog_df["prix_cible"].apply(fr_to_float)
+        prog_df["campagne"] = prog_df["campagne"].astype(str)
+
+    return prix_df, ventes_df, params_df, prog_df
 
 # --- Initialisation de la session ---
 if "page" not in st.session_state:
@@ -122,7 +148,7 @@ if "culture" not in st.session_state:
 
 # --- Chargement des données ---
 try:
-    prix_df_init, ventes_df_init, params_df_init = load_data()
+    prix_df_init, ventes_df_init, params_df_init, prog_df_init = load_data()
 except Exception as e:
     st.error(f"Erreur de connexion : {e}")
     st.stop()
@@ -135,7 +161,6 @@ if st.session_state.page == "selection":
     st.title("🌾 Pilotage Céréales")
     st.markdown("---")
 
-    # FIX 1 : sélecteur campagne avec défaut sur l'année en cours
     annee_courante = str(datetime.now().year)
     campagnes_disponibles = sorted(params_df_init["campagne"].unique().tolist())
 
@@ -150,7 +175,6 @@ if st.session_state.page == "selection":
         index=index_defaut
     )
 
-    # Filtrage cultures selon campagne
     params_camp = params_df_init[params_df_init["campagne"] == campagne_sel]
     cultures_dispo = params_camp["culture"].tolist()
 
@@ -158,36 +182,33 @@ if st.session_state.page == "selection":
         st.warning("Aucune culture trouvée pour cette campagne.")
         st.stop()
 
-    # Sélecteur culture
     culture_sel = st.selectbox("🌱 Culture", options=cultures_dispo)
 
     st.markdown("")
 
-    # Bouton navigation
     if st.button("📊 Voir le tableau de bord →"):
         st.session_state.campagne = campagne_sel
         st.session_state.culture = culture_sel
         st.session_state.page = "dashboard"
         st.rerun()
 
-    # Bouton rafraîchir discret
     st.markdown("")
     if st.button("🔄 Rafraîchir les données"):
         st.cache_data.clear()
         st.rerun()
 
 # ============================================================
-# PAGE 2 — Tableau de bord (graphique + saisie vente)
+# PAGE 2 — Tableau de bord
 # ============================================================
 elif st.session_state.page == "dashboard":
 
     campagne_selectionnee = st.session_state.campagne
     culture_sel = st.session_state.culture
 
-    # Filtrage données
     prix_df = prix_df_init[prix_df_init["campagne"] == campagne_selectionnee]
     ventes_df = ventes_df_init[ventes_df_init["campagne"] == campagne_selectionnee]
     params_df = params_df_init[params_df_init["campagne"] == campagne_selectionnee].reset_index(drop=True)
+    prog_df = prog_df_init[prog_df_init["campagne"] == campagne_selectionnee] if not prog_df_init.empty else pd.DataFrame()
 
     cultures = params_df["culture"].tolist()
 
@@ -225,7 +246,6 @@ elif st.session_state.page == "dashboard":
 
     fig = go.Figure()
 
-    # Courbe prix Vivescia
     fig.add_trace(go.Scatter(
         x=prix_culture["date"],
         y=prix_culture["prix"],
@@ -234,7 +254,6 @@ elif st.session_state.page == "dashboard":
         line=dict(color="#2196F3", width=2)
     ))
 
-    # Points de vente
     fig.add_trace(go.Scatter(
         x=ventes_culture["date"],
         y=ventes_culture["prix_vente"],
@@ -243,25 +262,23 @@ elif st.session_state.page == "dashboard":
         marker=dict(size=14, color="#FF5722", symbol="star")
     ))
 
-    # FIX 3 : Courbe PMP cumulé en escalier
+    # Courbe PMP cumulé en escalier
     if not ventes_culture.empty:
         ventes_triees = ventes_culture.sort_values("date").copy()
         ventes_triees["qte_cum"] = ventes_triees["quantite"].cumsum()
         ventes_triees["val_cum"] = (ventes_triees["prix_vente"] * ventes_triees["quantite"]).cumsum()
         ventes_triees["pmp_cum"] = ventes_triees["val_cum"] / ventes_triees["qte_cum"]
 
-        # Construire une courbe en escalier (le PMP reste stable entre deux ventes)
         dates_pmp = []
         valeurs_pmp = []
         for _, row in ventes_triees.iterrows():
             if dates_pmp:
-                dates_pmp.append(row["date"])       # prolonge au palier précédent
+                dates_pmp.append(row["date"])
                 valeurs_pmp.append(valeurs_pmp[-1])
             dates_pmp.append(row["date"])
             valeurs_pmp.append(row["pmp_cum"])
 
-        # Prolonger jusqu'à la dernière date de prix connue
-        if prix_culture.empty is False:
+        if not prix_culture.empty:
             derniere_date_prix = prix_culture["date"].iloc[-1]
             if dates_pmp and derniere_date_prix > dates_pmp[-1]:
                 dates_pmp.append(derniere_date_prix)
@@ -284,6 +301,101 @@ elif st.session_state.page == "dashboard":
         margin=dict(t=20, b=60, l=10, r=10)
     )
     st.plotly_chart(fig, use_container_width=True, key="graphique_prix")
+
+    # -------------------------------------------------------
+    # VENTES PROGRAMMÉES — liste + bouton validation
+    # -------------------------------------------------------
+    st.subheader("🎯 Ventes programmées")
+
+    prog_culture = prog_df[prog_df["culture"] == culture_sel] if not prog_df.empty else pd.DataFrame()
+
+    if prog_culture.empty:
+        st.info("Aucune vente programmée pour cette culture.")
+    else:
+        for idx, row in prog_culture.iterrows():
+            col_info, col_btn = st.columns([4, 1])
+            with col_info:
+                st.markdown(
+                    f"<div class='vente-prog'>"
+                    f"<b>{float_to_fr(row['quantite'], 1)} t</b> "
+                    f"si prix ≥ <b>{float_to_fr(row['prix_cible'])} €/t</b>"
+                    f"<br><small>Saisie le {row.get('date_saisie', '—')}</small>"
+                    f"</div>",
+                    unsafe_allow_html=True
+                )
+            with col_btn:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("✅", key=f"valider_{idx}"):
+                    try:
+                        sh = get_sheet()
+
+                        # 1. Copier dans ventes avec date du jour
+                        date_realisation = str(datetime.now().date())
+                        sh.worksheet("ventes").append_row([
+                            date_realisation,
+                            row["culture"],
+                            row["quantite"],
+                            row["prix_cible"],
+                            campagne_selectionnee
+                        ])
+
+                        # 2. Supprimer de ventes_programmees
+                        ws_prog = sh.worksheet("ventes_programmees")
+                        all_data = ws_prog.get_all_values()
+                        for i, r in enumerate(all_data):
+                            if (len(r) >= 4
+                                    and r[0] == row["culture"]
+                                    and fr_to_float(r[1]) == row["quantite"]
+                                    and fr_to_float(r[2]) == row["prix_cible"]
+                                    and r[3] == campagne_selectionnee):
+                                ws_prog.delete_rows(i + 1)  # gspread est 1-indexé
+                                break
+
+                        st.success(
+                            f"✅ Vente validée : {float_to_fr(row['quantite'], 1)} t "
+                            f"à {float_to_fr(row['prix_cible'])} €/t — ajoutée aux ventes."
+                        )
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erreur lors de la validation : {e}")
+
+    # -------------------------------------------------------
+    # FORMULAIRE — Programmer une vente
+    # -------------------------------------------------------
+    st.subheader("🗓️ Programmer une vente")
+
+    with st.form("nouvelle_vente_prog", clear_on_submit=True):
+        quantite_prog = st.text_input("Quantité (t)", value="0", help="Ex : 10")
+        prix_cible_prog = st.text_input("Prix cible (€/t)", value="0", help="Ex : 210")
+        submitted_prog = st.form_submit_button("📌 Enregistrer la programmation")
+
+        if submitted_prog:
+            qte = fr_to_float(quantite_prog)
+            prix_c = fr_to_float(prix_cible_prog)
+
+            if qte <= 0:
+                st.error("❌ La quantité doit être supérieure à 0.")
+            elif prix_c <= 0:
+                st.error("❌ Le prix cible doit être supérieur à 0.")
+            else:
+                try:
+                    sh = get_sheet()
+                    sh.worksheet("ventes_programmees").append_row([
+                        culture_sel,
+                        qte,
+                        prix_c,
+                        campagne_selectionnee,
+                        str(datetime.now().date())
+                    ])
+                    st.success(
+                        f"📌 Programmé : {float_to_fr(qte, 1)} t de {culture_sel} "
+                        f"si prix ≥ {float_to_fr(prix_c)} €/t"
+                    )
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erreur lors de l'enregistrement : {e}")
 
     # --- Jauge engagement ---
     st.subheader("📊 Engagement")
@@ -341,7 +453,7 @@ elif st.session_state.page == "dashboard":
 
     st.markdown("---")
 
-    # --- Saisie d'une nouvelle vente ---
+    # --- Saisie d'une nouvelle vente réelle ---
     st.subheader("➕ Enregistrer une vente")
 
     with st.form("nouvelle_vente", clear_on_submit=True):
@@ -361,9 +473,7 @@ elif st.session_state.page == "dashboard":
                 st.error("❌ Le prix doit être supérieur à 0.")
             else:
                 try:
-                    creds = get_credentials()
-                    gc = gspread.authorize(creds)
-                    sh = gc.open("dashboard_agricole")
+                    sh = get_sheet()
                     sh.worksheet("ventes").append_row([
                         str(date_vente),
                         culture_form,
