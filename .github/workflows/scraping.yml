@@ -1,0 +1,32 @@
+name: Scraping Arterre quotidien
+
+on:
+  schedule:
+    - cron: '0 7 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  scraping:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupération du code
+        uses: actions/checkout@v4
+
+      - name: Installation Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Installation des dépendances
+        run: |
+          pip install playwright gspread google-auth certifi
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Lancement du scraping
+        env:
+          ARTERRE_LOGIN: ${{ secrets.ARTERRE_LOGIN }}
+          ARTERRE_PASSWORD: ${{ secrets.ARTERRE_PASSWORD }}
+          GSHEET_CREDENTIALS: ${{ secrets.GSHEET_CREDENTIALS }}
+        run: python scraper.py
