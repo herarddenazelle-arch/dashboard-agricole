@@ -59,8 +59,9 @@ st.markdown("""
         border-left: 4px solid #FFA000;
         border-radius: 8px;
         padding: 0.6rem 0.75rem;
-        margin-bottom: 0.5rem;
+        margin-bottom: 0.25rem;
         font-size: 0.95rem;
+        line-height: 1.5;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -313,52 +314,51 @@ elif st.session_state.page == "dashboard":
         st.info("Aucune vente programmée pour cette culture.")
     else:
         for idx, row in prog_culture.iterrows():
-            col_info, col_btn = st.columns([4, 1])
-            with col_info:
-                st.markdown(
-                    f"<div class='vente-prog'>"
-                    f"<b>{float_to_fr(row['quantite'], 1)} t</b> "
-                    f"si prix ≥ <b>{float_to_fr(row['prix_cible'])} €/t</b>"
-                    f"<br><small>Saisie le {row.get('date_saisie', '—')}</small>"
-                    f"</div>",
-                    unsafe_allow_html=True
-                )
-            with col_btn:
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("✅", key=f"valider_{idx}"):
-                    try:
-                        sh = get_sheet()
+            # FIX : carte et bouton en pleine largeur, l'un sous l'autre — pas de colonnes
+            st.markdown(
+                f"<div class='vente-prog'>"
+                f"🌾 <b>{float_to_fr(row['quantite'], 1)} t</b> "
+                f"si prix ≥ <b>{float_to_fr(row['prix_cible'])} €/t</b>"
+                f"&nbsp;&nbsp;|&nbsp;&nbsp;<small>Saisie le {row.get('date_saisie', '—')}</small>"
+                f"</div>",
+                unsafe_allow_html=True
+            )
+            if st.button(f"✅ Valider cette vente", key=f"valider_{idx}"):
+                try:
+                    sh = get_sheet()
 
-                        # 1. Copier dans ventes avec date du jour
-                        date_realisation = str(datetime.now().date())
-                        sh.worksheet("ventes").append_row([
-                            date_realisation,
-                            row["culture"],
-                            row["quantite"],
-                            row["prix_cible"],
-                            campagne_selectionnee
-                        ])
+                    # 1. Copier dans ventes avec date du jour
+                    date_realisation = str(datetime.now().date())
+                    sh.worksheet("ventes").append_row([
+                        date_realisation,
+                        row["culture"],
+                        row["quantite"],
+                        row["prix_cible"],
+                        campagne_selectionnee
+                    ])
 
-                        # 2. Supprimer de ventes_programmees
-                        ws_prog = sh.worksheet("ventes_programmees")
-                        all_data = ws_prog.get_all_values()
-                        for i, r in enumerate(all_data):
-                            if (len(r) >= 4
-                                    and r[0] == row["culture"]
-                                    and fr_to_float(r[1]) == row["quantite"]
-                                    and fr_to_float(r[2]) == row["prix_cible"]
-                                    and r[3] == campagne_selectionnee):
-                                ws_prog.delete_rows(i + 1)  # gspread est 1-indexé
-                                break
+                    # 2. Supprimer de ventes_programmees
+                    ws_prog = sh.worksheet("ventes_programmees")
+                    all_data = ws_prog.get_all_values()
+                    for i, r in enumerate(all_data):
+                        if (len(r) >= 4
+                                and r[0] == row["culture"]
+                                and fr_to_float(r[1]) == row["quantite"]
+                                and fr_to_float(r[2]) == row["prix_cible"]
+                                and r[3] == campagne_selectionnee):
+                            ws_prog.delete_rows(i + 1)
+                            break
 
-                        st.success(
-                            f"✅ Vente validée : {float_to_fr(row['quantite'], 1)} t "
-                            f"à {float_to_fr(row['prix_cible'])} €/t — ajoutée aux ventes."
-                        )
-                        st.cache_data.clear()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Erreur lors de la validation : {e}")
+                    st.success(
+                        f"✅ Vente validée : {float_to_fr(row['quantite'], 1)} t "
+                        f"à {float_to_fr(row['prix_cible'])} €/t — ajoutée aux ventes."
+                    )
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erreur lors de la validation : {e}")
+
+        st.markdown("")
 
     # -------------------------------------------------------
     # FORMULAIRE — Programmer une vente
@@ -396,6 +396,8 @@ elif st.session_state.page == "dashboard":
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erreur lors de l'enregistrement : {e}")
+
+    st.markdown("---")
 
     # --- Jauge engagement ---
     st.subheader("📊 Engagement")
