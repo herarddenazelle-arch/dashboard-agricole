@@ -21,8 +21,8 @@ st.set_page_config(
 # CSS mobile-first
 st.markdown("""
 <style>
-    /* Réduire les marges générales */
-    .block-container { padding: 1rem 0.75rem 2rem; }
+    /* Compenser le bandeau supérieur Streamlit */
+    .block-container { padding: 4rem 0.75rem 2rem; }
 
     /* Boutons pleine largeur et plus grands */
     div.stButton > button {
@@ -105,6 +105,11 @@ def load_data():
     params_df["rendement_moyen"] = params_df["rendement_moyen"].apply(fr_to_float)
     params_df["volume_total_estime"] = params_df["volume_total_estime"].apply(fr_to_float)
 
+    # FIX 1 : forcer la campagne en string pour la comparaison avec l'année courante
+    params_df["campagne"] = params_df["campagne"].astype(str)
+    prix_df["campagne"] = prix_df["campagne"].astype(str)
+    ventes_df["campagne"] = ventes_df["campagne"].astype(str)
+
     return prix_df, ventes_df, params_df
 
 # --- Initialisation de la session ---
@@ -130,7 +135,7 @@ if st.session_state.page == "selection":
     st.title("🌾 Pilotage Céréales")
     st.markdown("---")
 
-    # Sélecteur campagne
+    # FIX 1 : sélecteur campagne avec défaut sur l'année en cours
     annee_courante = str(datetime.now().year)
     campagnes_disponibles = sorted(params_df_init["campagne"].unique().tolist())
 
@@ -212,13 +217,15 @@ elif st.session_state.page == "dashboard":
         col_s.metric("📐 Surface", f"{float_to_fr(surface, 1)} ha")
         col_r.metric("📦 Rendement moyen", f"{float_to_fr(rendement, 1)} t/ha")
 
-    # --- Graphique prix + ventes ---
+    # --- Graphique prix + ventes + PMP cumulé ---
     st.subheader("📈 Prix Vivescia & mes ventes")
 
     prix_culture = prix_df[prix_df["culture"] == culture_sel].sort_values("date")
     ventes_culture = ventes_df[ventes_df["culture"] == culture_sel]
 
     fig = go.Figure()
+
+    # Courbe prix Vivescia
     fig.add_trace(go.Scatter(
         x=prix_culture["date"],
         y=prix_culture["prix"],
@@ -226,6 +233,8 @@ elif st.session_state.page == "dashboard":
         name="Prix Vivescia",
         line=dict(color="#2196F3", width=2)
     ))
+
+    # Points de vente
     fig.add_trace(go.Scatter(
         x=ventes_culture["date"],
         y=ventes_culture["prix_vente"],
@@ -233,6 +242,39 @@ elif st.session_state.page == "dashboard":
         name="Mes ventes",
         marker=dict(size=14, color="#FF5722", symbol="star")
     ))
+
+    # FIX 3 : Courbe PMP cumulé en escalier
+    if not ventes_culture.empty:
+        ventes_triees = ventes_culture.sort_values("date").copy()
+        ventes_triees["qte_cum"] = ventes_triees["quantite"].cumsum()
+        ventes_triees["val_cum"] = (ventes_triees["prix_vente"] * ventes_triees["quantite"]).cumsum()
+        ventes_triees["pmp_cum"] = ventes_triees["val_cum"] / ventes_triees["qte_cum"]
+
+        # Construire une courbe en escalier (le PMP reste stable entre deux ventes)
+        dates_pmp = []
+        valeurs_pmp = []
+        for _, row in ventes_triees.iterrows():
+            if dates_pmp:
+                dates_pmp.append(row["date"])       # prolonge au palier précédent
+                valeurs_pmp.append(valeurs_pmp[-1])
+            dates_pmp.append(row["date"])
+            valeurs_pmp.append(row["pmp_cum"])
+
+        # Prolonger jusqu'à la dernière date de prix connue
+        if prix_culture.empty is False:
+            derniere_date_prix = prix_culture["date"].iloc[-1]
+            if dates_pmp and derniere_date_prix > dates_pmp[-1]:
+                dates_pmp.append(derniere_date_prix)
+                valeurs_pmp.append(valeurs_pmp[-1])
+
+        fig.add_trace(go.Scatter(
+            x=dates_pmp,
+            y=valeurs_pmp,
+            mode="lines",
+            name="PMP cumulé",
+            line=dict(color="#9C27B0", width=2, dash="dash")
+        ))
+
     fig.update_layout(
         xaxis_title="Date",
         yaxis_title="Prix (€/t)",
