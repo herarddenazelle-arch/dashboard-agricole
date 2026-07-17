@@ -5,12 +5,17 @@ on:
     - cron: '0 8 1 * *'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   keep_alive:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
         env:
           FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -18,5 +23,5 @@ jobs:
         run: |
           git config user.email "action@github.com"
           git config user.name "GitHub Action"
-          git commit --allow-empty -m "keep alive"
+          git commit --allow-empty -m "keep alive $(date)"
           git push
