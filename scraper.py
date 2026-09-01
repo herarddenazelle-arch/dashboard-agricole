@@ -25,6 +25,7 @@ ANNEES_RECOLTE = ["2026", "2027"]
 CULTURES_CIBLES = {
     "BLES POLYVALENTS": "Blé",
     "COLZA D'HIVER": "Colza",
+    "COLZA D HIVER": "Colza",
     "OP 2R RGT PLANET(ORGETTE)": "Orge",
     "ESC KWS FARO(ORGETTE)": "Escourgeon",
     "TOURNESOL OLEIQUE": "Tournesol"
@@ -88,7 +89,7 @@ def extraire_prix(cellule_texte):
     prix_texte = prix_texte.split("(")[0].strip()
     return prix_texte
 
-def attendre_tableau(frame, page, nb_lignes_min=5, max_tentatives=20, delai=5000):
+def attendre_tableau(frame, page, nb_lignes_min=5, max_tentatives=30, delai=5000):
     """Attend que le tableau soit chargé avec suffisamment de lignes."""
     print("⏳ Attente du rechargement du tableau...")
     for tentative in range(max_tentatives):
